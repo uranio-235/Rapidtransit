@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Rapidtransit.Tests/Rapidtransit.Tests.csproj" />
+  <Project Path="Rapidtransit/Rapidtransit.csproj" />
+</Solution>
