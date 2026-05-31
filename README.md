@@ -117,6 +117,27 @@ services.AddRapidtransit(o =>
 
 ---
 
+## Sequential handlers (one-at-a-time)
+
+If a specific handler must never overlap with itself, decorate it with `SequentialHandler`.
+
+```csharp
+[SequentialHandler]
+class InventoryProjectionHandler : IHandleMessages<InventoryAdjusted>
+{
+    public Task Handle(InventoryAdjusted message, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+}
+```
+
+Behavior:
+
+- Marked handlers: process one message at a time per handler type.
+- Unmarked handlers: keep normal parallel processing (bounded by `MaxParallelism`).
+- Middleware behavior is unchanged.
+
+---
+
 ## Architecture
 
 ```

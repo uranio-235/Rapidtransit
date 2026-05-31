@@ -8,9 +8,13 @@ internal sealed class HandlerRegistry
 {
     // message type → handler service type
     private readonly Dictionary<Type, Type> _map = [];
+    private readonly HashSet<Type> _sequentialHandlers = [];
 
     internal void Register(Type handlerType)
     {
+        if (handlerType.IsDefined(typeof(SequentialHandlerAttribute), inherit: true))
+            _sequentialHandlers.Add(handlerType);
+
         foreach (var iface in handlerType.GetInterfaces())
         {
             if (!iface.IsGenericType || iface.GetGenericTypeDefinition() != typeof(IHandleMessages<>))
@@ -52,6 +56,12 @@ internal sealed class HandlerRegistry
             ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
         }
     }
+
+    internal bool TryGetHandlerType(Type messageType, out Type handlerType)
+        => _map.TryGetValue(messageType, out handlerType!);
+
+    internal bool IsSequentialHandler(Type handlerType)
+        => _sequentialHandlers.Contains(handlerType);
 
     internal IEnumerable<Type> HandlerTypes => _map.Values;
 }

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,8 @@ internal sealed class DispatchWorker(
     RapidBusOptions options,
     ILogger<DispatchWorker> logger) : BackgroundService
 {
+    private readonly ConcurrentDictionary<Type, SemaphoreSlim> _sequentialHandlerGates = new();
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var semaphore = new SemaphoreSlim(options.MaxParallelism);
@@ -22,8 +25,17 @@ internal sealed class DispatchWorker(
 
             _ = Task.Run(async () =>
             {
+                SemaphoreSlim? sequentialGate = null;
+
                 try
                 {
+                    if (registry.TryGetHandlerType(message.GetType(), out var handlerType)
+                        && registry.IsSequentialHandler(handlerType))
+                    {
+                        sequentialGate = _sequentialHandlerGates.GetOrAdd(handlerType, _ => new SemaphoreSlim(1, 1));
+                        await sequentialGate.WaitAsync(stoppingToken);
+                    }
+
                     using var scope = scopeFactory.CreateScope();
 
                     Func<Task> pipeline = () => registry.Dispatch(message, scope.ServiceProvider, stoppingToken);
@@ -43,6 +55,7 @@ internal sealed class DispatchWorker(
                 }
                 finally
                 {
+                    sequentialGate?.Release();
                     semaphore.Release();
                 }
             }, stoppingToken);
