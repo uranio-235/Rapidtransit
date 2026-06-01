@@ -11,6 +11,7 @@
     <PackageId>Rapidtransit</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/uranio-235/Rapidtransit</PackageProjectUrl>
+    <PackageIcon>chadbus.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>dotnet;messaging;message-bus;channels;middleware</PackageTags>
     <RepositoryType>git</RepositoryType>
@@ -22,6 +23,7 @@
 
   <ItemGroup Condition="'$(MSBuildProjectName)' == 'Rapidtransit'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <None Include="$(MSBuildThisFileDirectory)Rapidtransit\chadbus.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

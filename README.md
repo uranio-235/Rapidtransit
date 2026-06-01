@@ -22,7 +22,7 @@ The service bus you bought in Temu.
 
 ## Look a this logo
 
-<img src="chadbus.png" alt="Chadbus" width="400" />
+<img src="Rapidtransit/chadbus.png" alt="Chadbus" width="400" />
 
 You have to admit it. It's awesome.
 
