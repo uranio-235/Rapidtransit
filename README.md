@@ -68,7 +68,7 @@ var bus = app.Services.GetRequiredService<IBus>();
 await bus.Send(new OrderPlaced(Guid.NewGuid()));
 ```
 
-Handlers are discovered automatically at startup. No manual registration, no wiring, no drama. Just pure, uncut **Chad‑level autodiscovery**.
+Handlers are discovered automatically at startup. No manual registration, no wiring, no drama. Just pure, uncut Chad‑level autodiscovery.
 ---
 
 ## Oh, look! It has middleware also.
