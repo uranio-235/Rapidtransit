@@ -10,7 +10,7 @@ The service bus you bought in Temu.
 - “Hold on, let me configure 19 transports and 47 options.”
 - Debugging requires **three dashboards and a prayer**.
 - Sends a message only after negotiating with five external daemons.
-- “It’s enterprise‑ready” (translation: *you will suffer*).
+- “It’s enterprise‑ready” (means: *you will suffer*).
 
 ### 💪 **The Chad Rapidtransit**
 - **In‑process message bus** — no brokers, no clusters, no drama.
@@ -20,7 +20,6 @@ The service bus you bought in Temu.
 - Debugging is literally “put a breakpoint here.”
 - Moves messages faster than your PM can say “microservices.”
 
----
 
 ## Getting started
 
@@ -69,7 +68,6 @@ await bus.Send(new OrderPlaced(Guid.NewGuid()));
 ```
 
 Handlers are discovered automatically at startup. No manual registration, no wiring, no drama. Just pure, uncut Chad‑level autodiscovery.
----
 
 ## Oh, look! It has middleware also.
 
@@ -87,7 +85,7 @@ class ErrorLoggingMiddleware(ILogger<ErrorLoggingMiddleware> logger) : IMessageM
         catch (Exception ex)
         {
             logger.LogError(ex, "Error handling {MessageType}", message.GetType().Name);
-            // swallow, rethrow, dead-letter, fuckoff
+            // swallow, rethrow, dead-letter, fuck off
         }
     }
 }
@@ -104,9 +102,7 @@ services.AddRapidtransit(o => o
 
 Middlewares execute in registration order (`ErrorLogging` → `Correlation` → handler).
 
----
-
-## Oh! It can be configured
+## Oh! Look. It can be configured
 
 ```csharp
 services.AddRapidtransit(o =>
@@ -121,14 +117,15 @@ services.AddRapidtransit(o =>
 
 | Option | Default | What it does |
 |---|---|---|
-| `MaxParallelism` | `5` | Max handlers running concurrently (backed by `SemaphoreSlim`) |
-| `ChannelCapacity` | `1000` | Max pending messages before `Send` back-pressures the caller |
+| `MaxParallelism` | `5` | How many handlers can party simultaneously. Crank it up for throughput, dial it down to pretend you care about resource limits. |
+| `ChannelCapacity` | `1000` | Queue depth before `Send` starts pushing back on callers. Think of it as a bouncer — polite, firm, and immune to bribes. |
 
----
 
 ## Sequential handlers (one-at-a-time)
 
-If a handler must **never** overlap with itself, just slap a `SequentialHandler` on it. No locks, no mutexes, no existential dread — just a handler so disciplined it queues its own reps.
+Some handlers are control freaks. They don't share. They don't overlap. They need to process one message at a time or the universe collapses.
+
+Slap `[SequentialHandler]` on them and move on with your life.
 
 ```csharp
 [SequentialHandler]
@@ -139,15 +136,15 @@ class InventoryProjectionHandler : IHandleMessages<InventoryAdjusted>
 }
 ```
 
-Behavior:
+No locks. No mutexes. No `volatile bool _isRunning` with a comment that says `// don't touch this`. Just an attribute and a handler disciplined enough to queue its own reps.
 
-- Marked handlers: process one message at a time per handler type.
-- Unmarked handlers: keep normal parallel processing (bounded by `MaxParallelism`).
-- Middleware behavior is unchanged.
-
----
+- Marked handlers: strict one-at-a-time, per handler type.
+- Unmarked handlers: live their best parallel life (bounded by `MaxParallelism`).
+- Middleware: doesn't care either way.
 
 ## Architecture
+
+You asked for a diagram. Fine. Here is your usless diagram.
 
 ```
 bus.Send(message)
@@ -160,17 +157,23 @@ DispatchWorker (BackgroundService)
                 └─► Middleware₁ → Middleware₂ → ... → IHandleMessages<T>.Handle()
 ```
 
-- **One channel, one reader** — ordered delivery, no race on dequeue.
-- **`SemaphoreSlim(MaxParallelism)`** — bounded concurrency without a thread-per-message.
-- **`IServiceScope` per message** — scoped DI dependencies work correctly; handlers and middlewares share the same scope.
-- **Middleware pipeline** — built as a `Func<Task>` chain (same pattern as ASP.NET Core). Each middleware calls `await next()` to proceed.
-- **Exception propagation** — `TargetInvocationException` from reflection is unwrapped via `ExceptionDispatchInfo` so middleware `catch` blocks see the original exception type.
+Happy?
 
----
+## Internal weirdness
+
+- **One channel, one reader** — ordered delivery, zero drama on dequeue.
+- **`SemaphoreSlim(MaxParallelism)`** — bounded concurrency without spawning a thread for every message like it's 2004.
+- **`IServiceScope` per message** — scoped DI works correctly; handlers and middlewares share the scope so nothing leaks into the next message's business.
+- **Middleware pipeline** — a `Func<Task>` chain, same as ASP.NET Core. You already know how `await next()` works. Good.
+- **Exception propagation** — `TargetInvocationException` from reflection gets unwrapped via `ExceptionDispatchInfo`, so your `catch (OrderNotFoundException)` actually catches `OrderNotFoundException` instead of a reflection wrapper that makes you feel stupid.
+
+That's the whole thing. No hidden services, no background registries, no "magic" that becomes someone else's problem at 3 AM.
 
 ## Testing
 
-The framework is designed to be test-friendly: just host it with `Host.CreateDefaultBuilder()` in xUnit and use `TaskCompletionSource<T>` or a countdown latch to await dispatch.
+No Docker. No TestContainers. No RabbitMQ running in the background judging you.
+
+Just spin up the host, send a message, and await the result like a normal person.
 
 ```csharp
 [Fact]
@@ -197,7 +200,9 @@ public async Task Send_delivers_to_handler()
 }
 ```
 
----
+If this test fails, your handler is broken. Not the bus. Not the channel. Not a transient network hiccup between your app and a broker 200ms away. **Check your handler.**
+
+Debugging at its finest.
 
 ## License
 
@@ -212,8 +217,6 @@ Copyright (C) 2004 Sam Hocevar <sam@hocevar.net>
 Everyone is permitted to copy and distribute verbatim or modified
 copies of this license document, and changing it is allowed as long
 as the name is changed.
-
-### DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
 
 #### TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
 
