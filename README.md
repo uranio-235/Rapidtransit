@@ -1,18 +1,24 @@
 # Rapidtransit
 
-An in-process message bus for .NET built on top of `System.Threading.Channels`. Inspired by Rebus — same `bus.Send` / `IHandleMessages<T>` ergonomics, zero external infrastructure.
+The service bus you bought in Temu.
 
-```csharp
-await bus.Send(new OrderPlaced(orderId));
-```
+## Wait... What?
 
-That's it. The handler picks it up automatically.
+### 🥀 **The Virgin Masstransit**
+- Requires a **full message broker** just to say hello — RabbitMQ, Kafka, Azure Service Bus, etc.
+- Brings **infrastructure baggage** like it’s moving in permanently.
+- “Hold on, let me configure 19 transports and 47 options.”
+- Debugging requires **three dashboards and a prayer**.
+- Sends a message only after negotiating with five external daemons.
+- “It’s enterprise‑ready” (translation: *you will suffer*).
 
----
-
-## Why
-
-External message brokers (RabbitMQ, Azure Service Bus, etc.) are great for distributed systems, but add significant operational overhead for in-process communication. Rapidtransit gives you the same clean handler-based programming model over a `Channel<T>` instead — no broker, no network, no serialization.
+### 💪 **The Chad Rapidtransit**
+- **In‑process message bus** — no brokers, no clusters, no drama.
+- Built on **System.Threading.Channels**, because real chads use the BCL.
+- `bus.Send` + `IHandleMessages<T>` ergonomics without the ceremony.
+- **Zero external infrastructure** — deploy and go.
+- Debugging is literally “put a breakpoint here.”
+- Moves messages faster than your PM can say “microservices.”
 
 ---
 
@@ -24,7 +30,11 @@ External message brokers (RabbitMQ, Azure Service Bus, etc.) are great for distr
 dotnet add package Rapidtransit
 ```
 
+Done.
+
 ### 2. Register
+
+Oh! Look at this. It has a fluent API. What a pro!
 
 ```csharp
 builder.Services.AddRapidtransit(o => o
@@ -58,13 +68,12 @@ var bus = app.Services.GetRequiredService<IBus>();
 await bus.Send(new OrderPlaced(Guid.NewGuid()));
 ```
 
-Handlers are discovered automatically at startup. No manual registration, no wiring.
-
+Handlers are discovered automatically at startup. No manual registration, no wiring, no drama. Just pure, uncut **Chad‑level autodiscovery**.
 ---
 
-## Middleware
+## Oh, look! It has middleware also.
 
-Middleware wraps every message dispatch. Useful for logging, error tracking, retries, correlation IDs, etc.
+The old reliable `await next()` for your try and catch.
 
 ```csharp
 class ErrorLoggingMiddleware(ILogger<ErrorLoggingMiddleware> logger) : IMessageMiddleware
@@ -78,13 +87,13 @@ class ErrorLoggingMiddleware(ILogger<ErrorLoggingMiddleware> logger) : IMessageM
         catch (Exception ex)
         {
             logger.LogError(ex, "Error handling {MessageType}", message.GetType().Name);
-            // swallow, rethrow, dead-letter — your call
+            // swallow, rethrow, dead-letter, fuckoff
         }
     }
 }
 ```
 
-Register it fluently:
+Register it. Fluently of course. How else could be?
 
 ```csharp
 services.AddRapidtransit(o => o
@@ -97,7 +106,7 @@ Middlewares execute in registration order (`ErrorLogging` → `Correlation` → 
 
 ---
 
-## Configuration
+## Oh! It can be configured
 
 ```csharp
 services.AddRapidtransit(o =>
@@ -110,7 +119,7 @@ services.AddRapidtransit(o =>
 });
 ```
 
-| Option | Default | Description |
+| Option | Default | What it does |
 |---|---|---|
 | `MaxParallelism` | `5` | Max handlers running concurrently (backed by `SemaphoreSlim`) |
 | `ChannelCapacity` | `1000` | Max pending messages before `Send` back-pressures the caller |
@@ -119,7 +128,7 @@ services.AddRapidtransit(o =>
 
 ## Sequential handlers (one-at-a-time)
 
-If a specific handler must never overlap with itself, decorate it with `SequentialHandler`.
+If a handler must **never** overlap with itself, just slap a `SequentialHandler` on it. No locks, no mutexes, no existential dread — just a handler so disciplined it queues its own reps.
 
 ```csharp
 [SequentialHandler]
@@ -192,4 +201,20 @@ public async Task Send_delivers_to_handler()
 
 ## License
 
-MIT
+WTFPL
+
+### DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+
+Version 2, December 2004
+
+Copyright (C) 2004 Sam Hocevar <sam@hocevar.net>
+
+Everyone is permitted to copy and distribute verbatim or modified
+copies of this license document, and changing it is allowed as long
+as the name is changed.
+
+### DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+
+#### TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+0. You just DO WHAT THE FUCK YOU WANT TO.
