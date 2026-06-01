@@ -20,6 +20,11 @@ The service bus you bought in Temu.
 - Debugging is literally “put a breakpoint here.”
 - Moves messages faster than your PM can say “microservices.”
 
+## Look a this logo
+
+<img src="chadbus.png" alt="Chadbus" width="400" />
+
+You have to admit it. It's awesome.
 
 ## Getting started
 
@@ -144,7 +149,7 @@ No locks. No mutexes. No `volatile bool _isRunning` with a comment that says `//
 
 ## Architecture
 
-You asked for a diagram. Fine. Here is your usless diagram.
+You asked for a diagram. Fine. Here is your useless diagram.
 
 ```
 bus.Send(message)
