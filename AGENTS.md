@@ -40,8 +40,10 @@ When the user says something like `haz un release`, follow this workflow:
 ## Expected release commands
 
 - Get the latest tag: `git describe --tags --abbrev=0`
-- Create an annotated tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+- Propose the next version and wait for user confirmation.
+- Create the annotated tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 - Push the tag: `git push origin vX.Y.Z`
+- Create the GitHub release: `gh release create vX.Y.Z --title "Release vX.Y.Z" --notes "Release notes here"`
 
 ## Notes for NuGet publishing
 
