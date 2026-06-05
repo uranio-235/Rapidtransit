@@ -13,7 +13,7 @@ public static class ServiceCollectionExtensions
         var opts = new RapidBusOptions();
         configure?.Invoke(opts);
 
-        var channel = Channel.CreateBounded<object>(new BoundedChannelOptions(opts.ChannelCapacity)
+        var channel = Channel.CreateBounded<Envelope>(new BoundedChannelOptions(opts.ChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,

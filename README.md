@@ -126,25 +126,36 @@ services.AddRapidtransit(o =>
 | `ChannelCapacity` | `1000` | Queue depth before `Send` starts pushing back on callers. Think of it as a bouncer — polite, firm, and immune to bribes. |
 
 
-## Sequential handlers (one-at-a-time)
+## Partitioned handlers (concurrent, but not feral)
 
-Some handlers are control freaks. They don't share. They don't overlap. They need to process one message at a time or the universe collapses.
+Your `OrderUpdateHandler` can handle 500 orders at once. Great. Until two messages for the *same* order race each other and you get a fun consistency bug at 3 AM.
 
-Slap `[SequentialHandler]` on them and move on with your life.
+Pass a partition key. The bus does the rest.
 
 ```csharp
-[SequentialHandler]
-class InventoryProjectionHandler : IHandleMessages<InventoryAdjusted>
-{
-    public Task Handle(InventoryAdjusted message, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
-}
+await bus.Send(new OrderUpdate(orderId), partition: orderId);
 ```
 
-No locks. No mutexes. No `volatile bool _isRunning` with a comment that says `// don't touch this`. Just an attribute and a handler disciplined enough to queue its own reps.
+That's it. No attributes. No locks. No `volatile bool _isProcessing` with a comment that says `// DO NOT REMOVE`.
 
-- Marked handlers: strict one-at-a-time, per handler type.
-- Unmarked handlers: live their best parallel life (bounded by `MaxParallelism`).
+- **Same key**: strict one-at-a-time. Two messages for order `42`? They queue. Politely.
+- **Different keys**: full parallel. Order `42` and order `99` don't even know each other exist.
+- **No key at all**: parallel free-for-all, bounded by `MaxParallelism`. The default Chad behavior.
+
+The key can be anything with a `.ToString()`. A `Guid`, an `int`, a string, a social security number (please don't). The bus converts it internally and doesn't judge.
+
+```csharp
+// Same order → sequential
+await bus.Send(new OrderUpdate(orderId), partition: orderId);
+
+// Different orders → parallel
+await bus.Send(new OrderUpdate(order1Id), partition: order1Id);
+await bus.Send(new OrderUpdate(order2Id), partition: order2Id);
+
+// No opinion → do whatever
+await bus.Send(new AuditLog("something happened"));
+```
+
 - Middleware: doesn't care either way.
 
 ## Architecture
@@ -152,12 +163,13 @@ No locks. No mutexes. No `volatile bool _isRunning` with a comment that says `//
 You asked for a diagram. Fine. Here is your useless diagram.
 
 ```
-bus.Send(message)
-    └─► Channel<object>.Writer.WriteAsync()
+bus.Send(message, partition?)
+    └─► Channel<Envelope>.Writer.WriteAsync()
 
 DispatchWorker (BackgroundService)
-    └─► Channel<object>.Reader.ReadAllAsync()
+    └─► Channel<Envelope>.Reader.ReadAllAsync()
         └─► per-message Task.Run (bounded by SemaphoreSlim)
+            ├─► partition gate (SemaphoreSlim per (Type, key)) — only if partition != null
             └─► IServiceScope (fresh scope per message)
                 └─► Middleware₁ → Middleware₂ → ... → IHandleMessages<T>.Handle()
 ```

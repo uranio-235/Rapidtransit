@@ -7,55 +7,55 @@ using Microsoft.Extensions.Logging;
 namespace Rapidtransit;
 
 internal sealed class DispatchWorker(
-    Channel<object> channel,
+    Channel<Envelope> channel,
     HandlerRegistry registry,
     IServiceScopeFactory scopeFactory,
     RapidBusOptions options,
     ILogger<DispatchWorker> logger) : BackgroundService
 {
-    private readonly ConcurrentDictionary<Type, SemaphoreSlim> _sequentialHandlerGates = new();
+    private readonly ConcurrentDictionary<(Type, string), SemaphoreSlim> _partitionGates = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var semaphore = new SemaphoreSlim(options.MaxParallelism);
 
-        await foreach (var message in channel.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var envelope in channel.Reader.ReadAllAsync(stoppingToken))
         {
             await semaphore.WaitAsync(stoppingToken);
 
             _ = Task.Run(async () =>
             {
-                SemaphoreSlim? sequentialGate = null;
+                SemaphoreSlim? partitionGate = null;
 
                 try
                 {
-                    if (registry.TryGetHandlerType(message.GetType(), out var handlerType)
-                        && registry.IsSequentialHandler(handlerType))
+                    if (envelope.Partition is not null)
                     {
-                        sequentialGate = _sequentialHandlerGates.GetOrAdd(handlerType, _ => new SemaphoreSlim(1, 1));
-                        await sequentialGate.WaitAsync(stoppingToken);
+                        var key = (envelope.Message.GetType(), envelope.Partition);
+                        partitionGate = _partitionGates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+                        await partitionGate.WaitAsync(stoppingToken);
                     }
 
                     using var scope = scopeFactory.CreateScope();
 
-                    Func<Task> pipeline = () => registry.Dispatch(message, scope.ServiceProvider, stoppingToken);
+                    Func<Task> pipeline = () => registry.Dispatch(envelope.Message, scope.ServiceProvider, stoppingToken);
 
                     foreach (var middlewareType in options.MiddlewareTypes.AsEnumerable().Reverse())
                     {
                         var next = pipeline;
                         var mw = (IMessageMiddleware)scope.ServiceProvider.GetRequiredService(middlewareType);
-                        pipeline = () => mw.Handle(message, next, stoppingToken);
+                        pipeline = () => mw.Handle(envelope.Message, next, stoppingToken);
                     }
 
                     await pipeline();
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Unhandled exception dispatching {MessageType}", message.GetType().Name);
+                    logger.LogError(ex, "Unhandled exception dispatching {MessageType}", envelope.Message.GetType().Name);
                 }
                 finally
                 {
-                    sequentialGate?.Release();
+                    partitionGate?.Release();
                     semaphore.Release();
                 }
             }, stoppingToken);
