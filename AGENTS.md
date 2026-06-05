@@ -10,6 +10,7 @@ These instructions apply to the Rapidtransit repository.
 - Prefer the smallest focused change that satisfies the request.
 - Do not overwrite user changes unless the user explicitly asks for it.
 - After any edit, validate the change with the cheapest meaningful check available.
+- Default shell is PowerShell not CMD nor bash.
 
 ## Release workflow
 
