@@ -32,18 +32,19 @@ When the user says something like `haz un release`, follow this workflow:
 
 ## Release decision rules
 
-- If the user does not specify the next version, inspect the latest tag and propose the next version before tagging.
-- If the user does specify the version, use that exact version.
+- Always increment the minor version and reset patch to zero: `v0.X.Y` → `v0.(X+1).0`. Do not ask for confirmation.
+- If the user specifies the version explicitly, use that exact version instead.
 - If the working tree has uncommitted changes, stop and report that a commit is needed before releasing.
 - Never create a release tag from an unclean tree.
 
 ## Expected release commands
 
 - Get the latest tag: `git describe --tags --abbrev=0`
-- Propose the next version and wait for user confirmation.
+- Compute next version (`v0.(X+1).0`)
 - Create the annotated tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 - Push the tag: `git push origin vX.Y.Z`
 - Create the GitHub release: `gh release create vX.Y.Z --title "Release vX.Y.Z" --notes "Release notes here"`
+- Both the tag push and the GitHub release are required. Do not skip either.
 
 ## Notes for NuGet publishing
 
