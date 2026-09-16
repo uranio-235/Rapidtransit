@@ -158,12 +158,44 @@ await bus.Send(new AuditLog("something happened"));
 
 - Middleware: doesn't care either way.
 
+### Give-up time (or: this message is going out the window)
+
+Sometimes a message waiting in line is less useful than no message at all. Maybe it is a price update, a typing indicator, or a request that has already outlived the person who asked for it. Give it a `giveupTime` and Rapidtransit will stop pretending it is still relevant.
+
+```csharp
+await bus.Send(
+    new OrderUpdate(orderId),
+    partition: orderId,
+    giveupTime: TimeSpan.FromSeconds(30));
+```
+
+`giveupTime` is optional and starts counting when `Send` puts the message in the queue. It includes time spent waiting for:
+
+- the channel;
+- `MaxParallelism`;
+- the message's partition gate.
+
+If the message has waited longer than its `giveupTime` when its turn arrives, Rapidtransit throws it out the window before middleware and before the handler. No exception, no retry, no paperwork. The worker simply processes the next message.
+
+```csharp
+// The first message is being processed.
+await bus.Send(new OrderUpdate(orderId), partition: orderId);
+
+// If this waits longer than five seconds, it goes out the window.
+await bus.Send(
+    new OrderUpdate(orderId),
+    partition: orderId,
+    giveupTime: TimeSpan.FromSeconds(5));
+```
+
+This is especially useful with partitioned messages: strict ordering still applies, but stale messages do not get a VIP pass to the handler just because they arrived first.
+
 ## Architecture
 
 You asked for a diagram. Fine. Here is your useless diagram.
 
 ```
-bus.Send(message, partition?)
+bus.Send(message, partition?, giveupTime?)
     └─► Channel<Envelope>.Writer.WriteAsync()
 
 DispatchWorker (BackgroundService)

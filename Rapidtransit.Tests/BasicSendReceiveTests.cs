@@ -82,6 +82,45 @@ public class BasicSendReceiveTests
 
         await host.StopAsync();
     }
+
+    [Fact]
+    public async Task Send_discards_message_that_exceeds_giveup_time()
+    {
+        var probe = new GiveupTimeProbe();
+
+        var host = Host.CreateDefaultBuilder()
+            .ConfigureServices(services =>
+            {
+                services.AddSingleton(probe);
+                services.AddRapidtransit(o =>
+                {
+                    o.MaxParallelism = 2;
+                    o.RegisterHandlersFrom<GiveupTimeHandler>();
+                });
+            })
+            .Build();
+
+        await host.StartAsync();
+
+        var bus = host.Services.GetRequiredService<IBus>();
+        await bus.Send(new GiveupTimeMessage(1), partition: "same-key");
+        await probe.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await bus.Send(
+            new GiveupTimeMessage(2),
+            partition: "same-key",
+            giveupTime: TimeSpan.FromMilliseconds(50));
+
+        await Task.Delay(100);
+        probe.ReleaseFirst.TrySetResult();
+        await probe.FirstFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            probe.SecondHandled.Task.WaitAsync(TimeSpan.FromMilliseconds(250)));
+
+        await host.StopAsync();
+    }
+
 }
 
 // --- Messages ---
@@ -89,6 +128,7 @@ public class BasicSendReceiveTests
 record PingMessage(string Content);
 record CountMessage(int Index);
 record StoreMessage(string Value);
+record GiveupTimeMessage(int Number);
 
 // --- Handlers ---
 
@@ -119,11 +159,35 @@ class StoringHandler(MessageStore store) : IHandleMessages<StoreMessage>
     }
 }
 
+class GiveupTimeHandler(GiveupTimeProbe probe) : IHandleMessages<GiveupTimeMessage>
+{
+    public async Task Handle(GiveupTimeMessage message, CancellationToken cancellationToken = default)
+    {
+        if (message.Number == 1)
+        {
+            probe.FirstStarted.TrySetResult();
+            await probe.ReleaseFirst.Task.WaitAsync(cancellationToken);
+            probe.FirstFinished.TrySetResult();
+            return;
+        }
+
+        probe.SecondHandled.TrySetResult();
+    }
+}
+
 // --- Helpers ---
 
 class MessageStore
 {
     public List<string> Items { get; } = [];
+}
+
+class GiveupTimeProbe
+{
+    public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource FirstFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource SecondHandled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 class CountdownLatch(int count)

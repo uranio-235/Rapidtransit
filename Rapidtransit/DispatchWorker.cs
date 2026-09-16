@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,6 +35,17 @@ internal sealed class DispatchWorker(
                         var key = (envelope.Message.GetType(), envelope.Partition);
                         partitionGate = _partitionGates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
                         await partitionGate.WaitAsync(stoppingToken);
+                    }
+
+                    if (envelope.GiveupTime is { } giveupTime &&
+                        Stopwatch.GetElapsedTime(envelope.EnqueuedTimestamp) > giveupTime)
+                    {
+                        logger.LogDebug(
+                            "Discarding expired message {MessageType} after waiting {TimeWaiting}; give-up time was {GiveupTime}.",
+                            envelope.Message.GetType().Name,
+                            Stopwatch.GetElapsedTime(envelope.EnqueuedTimestamp),
+                            giveupTime);
+                        return;
                     }
 
                     using var scope = scopeFactory.CreateScope();
