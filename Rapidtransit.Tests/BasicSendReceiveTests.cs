@@ -84,9 +84,9 @@ public class BasicSendReceiveTests
     }
 
     [Fact]
-    public async Task Send_discards_message_that_exceeds_giveup_time()
+    public async Task Send_latest_wins_discards_pending_messages_in_same_partition()
     {
-        var probe = new GiveupTimeProbe();
+        var probe = new LatestWinsProbe();
 
         var host = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
@@ -95,7 +95,7 @@ public class BasicSendReceiveTests
                 services.AddRapidtransit(o =>
                 {
                     o.MaxParallelism = 2;
-                    o.RegisterHandlersFrom<GiveupTimeHandler>();
+                    o.RegisterHandlersFrom<LatestWinsHandler>();
                 });
             })
             .Build();
@@ -103,20 +103,65 @@ public class BasicSendReceiveTests
         await host.StartAsync();
 
         var bus = host.Services.GetRequiredService<IBus>();
-        await bus.Send(new GiveupTimeMessage(1), partition: "same-key");
+        await bus.Send(new LatestWinsMessage(1), partition: "same-key");
         await probe.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         await bus.Send(
-            new GiveupTimeMessage(2),
+            new LatestWinsMessage(2),
             partition: "same-key",
-            giveupTime: TimeSpan.FromMilliseconds(50));
+            deliveryMode: DeliveryMode.LatestWins);
+
+        await bus.Send(
+            new LatestWinsMessage(3),
+            partition: "same-key",
+            deliveryMode: DeliveryMode.LatestWins);
 
         await Task.Delay(100);
         probe.ReleaseFirst.TrySetResult();
         await probe.FirstFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-            probe.SecondHandled.Task.WaitAsync(TimeSpan.FromMilliseconds(250)));
+        var handled = await probe.LastHandled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(3, handled);
+        Assert.DoesNotContain(2, probe.Handled);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task Send_busy_discards_messages_while_partition_is_busy()
+    {
+        var probe = new BusyProbe();
+
+        var host = Host.CreateDefaultBuilder()
+            .ConfigureServices(services =>
+            {
+                services.AddSingleton(probe);
+                services.AddRapidtransit(o =>
+                {
+                    o.MaxParallelism = 2;
+                    o.RegisterHandlersFrom<BusyHandler>();
+                });
+            })
+            .Build();
+
+        await host.StartAsync();
+
+        var bus = host.Services.GetRequiredService<IBus>();
+        await bus.Send(new BusyMessage(1), partition: "same-key", deliveryMode: DeliveryMode.Busy);
+        await probe.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await bus.Send(new BusyMessage(2), partition: "same-key", deliveryMode: DeliveryMode.Busy);
+        await Task.Delay(100);
+        probe.ReleaseFirst.TrySetResult();
+        await probe.FirstFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(100);
+
+        await bus.Send(new BusyMessage(3), partition: "same-key", deliveryMode: DeliveryMode.Busy);
+        var handled = await probe.LastHandled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(3, handled);
+        Assert.DoesNotContain(2, probe.Handled);
 
         await host.StopAsync();
     }
@@ -128,7 +173,8 @@ public class BasicSendReceiveTests
 record PingMessage(string Content);
 record CountMessage(int Index);
 record StoreMessage(string Value);
-record GiveupTimeMessage(int Number);
+record LatestWinsMessage(int Number);
+record BusyMessage(int Number);
 
 // --- Handlers ---
 
@@ -159,9 +205,9 @@ class StoringHandler(MessageStore store) : IHandleMessages<StoreMessage>
     }
 }
 
-class GiveupTimeHandler(GiveupTimeProbe probe) : IHandleMessages<GiveupTimeMessage>
+class LatestWinsHandler(LatestWinsProbe probe) : IHandleMessages<LatestWinsMessage>
 {
-    public async Task Handle(GiveupTimeMessage message, CancellationToken cancellationToken = default)
+    public async Task Handle(LatestWinsMessage message, CancellationToken cancellationToken = default)
     {
         if (message.Number == 1)
         {
@@ -171,7 +217,25 @@ class GiveupTimeHandler(GiveupTimeProbe probe) : IHandleMessages<GiveupTimeMessa
             return;
         }
 
-        probe.SecondHandled.TrySetResult();
+        probe.Handled.Add(message.Number);
+        probe.LastHandled.TrySetResult(message.Number);
+    }
+}
+
+class BusyHandler(BusyProbe probe) : IHandleMessages<BusyMessage>
+{
+    public async Task Handle(BusyMessage message, CancellationToken cancellationToken = default)
+    {
+        if (message.Number == 1)
+        {
+            probe.FirstStarted.TrySetResult();
+            await probe.ReleaseFirst.Task.WaitAsync(cancellationToken);
+            probe.FirstFinished.TrySetResult();
+            return;
+        }
+
+        probe.Handled.Add(message.Number);
+        probe.LastHandled.TrySetResult(message.Number);
     }
 }
 
@@ -182,12 +246,22 @@ class MessageStore
     public List<string> Items { get; } = [];
 }
 
-class GiveupTimeProbe
+class LatestWinsProbe
 {
     public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource FirstFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public TaskCompletionSource SecondHandled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<int> LastHandled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public List<int> Handled { get; } = [];
+}
+
+class BusyProbe
+{
+    public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource FirstFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<int> LastHandled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public List<int> Handled { get; } = [];
 }
 
 class CountdownLatch(int count)

@@ -1,26 +1,34 @@
-using System.Diagnostics;
 using System.Threading.Channels;
 
 namespace Rapidtransit;
 
-internal sealed class RapidBus(Channel<Envelope> channel) : IBus
+internal sealed class RapidBus(Channel<Envelope> channel, LatestWinsRegistry latestWinsRegistry) : IBus
 {
-    public ValueTask Send<TMessage>(
+    private long _sequence;
+
+    public async ValueTask Send<TMessage>(
         TMessage message,
         object? partition = null,
-        TimeSpan? giveupTime = null,
+        DeliveryMode deliveryMode = DeliveryMode.EveryoneGetsAChance,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        if (giveupTime < TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(giveupTime), "Give-up time cannot be negative.");
+        if (!Enum.IsDefined(deliveryMode))
+            throw new ArgumentOutOfRangeException(nameof(deliveryMode));
 
-        return channel.Writer.WriteAsync(
-            new Envelope(message, partition?.ToString(), giveupTime, Stopwatch.GetTimestamp()),
-            cancellationToken);
+        if (deliveryMode is DeliveryMode.LatestWins or DeliveryMode.Busy && partition is null)
+            throw new ArgumentException($"{deliveryMode} requires a partition key.", nameof(partition));
+
+        var partitionKey = partition?.ToString();
+        var envelope = new Envelope(message, partitionKey, deliveryMode, Interlocked.Increment(ref _sequence));
+
+        await channel.Writer.WriteAsync(envelope, cancellationToken);
+
+        if (deliveryMode == DeliveryMode.LatestWins)
+            latestWinsRegistry.Register((message.GetType(), partitionKey!), envelope);
     }
 
     public ValueTask Send<TMessage>(TMessage message, object? partition, CancellationToken cancellationToken)
-        => Send(message, partition, giveupTime: null, cancellationToken);
+        => Send(message, partition, DeliveryMode.EveryoneGetsAChance, cancellationToken);
 }

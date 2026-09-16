@@ -10,6 +10,7 @@ namespace Rapidtransit;
 internal sealed class DispatchWorker(
     Channel<Envelope> channel,
     HandlerRegistry registry,
+    LatestWinsRegistry latestWinsRegistry,
     IServiceScopeFactory scopeFactory,
     RapidBusOptions options,
     ILogger<DispatchWorker> logger) : BackgroundService
@@ -22,30 +23,40 @@ internal sealed class DispatchWorker(
 
         await foreach (var envelope in channel.Reader.ReadAllAsync(stoppingToken))
         {
+            var partitionKey = envelope.Partition is null
+                ? ((Type, string)?)null
+                : (envelope.Message.GetType(), envelope.Partition);
+
             await semaphore.WaitAsync(stoppingToken);
 
             _ = Task.Run(async () =>
             {
                 SemaphoreSlim? partitionGate = null;
+                var partitionGateAcquired = false;
 
                 try
                 {
-                    if (envelope.Partition is not null)
+                    if (partitionKey is not null)
                     {
-                        var key = (envelope.Message.GetType(), envelope.Partition);
+                        var key = partitionKey.Value;
                         partitionGate = _partitionGates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
-                        await partitionGate.WaitAsync(stoppingToken);
-                    }
+                        if (envelope.DeliveryMode == DeliveryMode.Busy)
+                        {
+                            if (!partitionGate.Wait(0))
+                                return;
+                        }
+                        else
+                        {
+                            await partitionGate.WaitAsync(stoppingToken);
+                        }
 
-                    if (envelope.GiveupTime is { } giveupTime &&
-                        Stopwatch.GetElapsedTime(envelope.EnqueuedTimestamp) > giveupTime)
-                    {
-                        logger.LogDebug(
-                            "Discarding expired message {MessageType} after waiting {TimeWaiting}; give-up time was {GiveupTime}.",
-                            envelope.Message.GetType().Name,
-                            Stopwatch.GetElapsedTime(envelope.EnqueuedTimestamp),
-                            giveupTime);
-                        return;
+                        partitionGateAcquired = true;
+
+                        if (envelope.DeliveryMode == DeliveryMode.LatestWins &&
+                            !latestWinsRegistry.IsLatest(key, envelope))
+                        {
+                            return;
+                        }
                     }
 
                     using var scope = scopeFactory.CreateScope();
@@ -67,7 +78,11 @@ internal sealed class DispatchWorker(
                 }
                 finally
                 {
-                    partitionGate?.Release();
+                    if (partitionKey is not null && envelope.DeliveryMode == DeliveryMode.LatestWins)
+                        latestWinsRegistry.Remove(partitionKey.Value, envelope);
+
+                    if (partitionGateAcquired)
+                        partitionGate!.Release();
                     semaphore.Release();
                 }
             }, stoppingToken);

@@ -158,44 +158,63 @@ await bus.Send(new AuditLog("something happened"));
 
 - Middleware: doesn't care either way.
 
-### Give-up time (or: this message is going out the window)
+### Latest wins
 
-Sometimes a message waiting in line is less useful than no message at all. Maybe it is a price update, a typing indicator, or a request that has already outlived the person who asked for it. Give it a `giveupTime` and Rapidtransit will stop pretending it is still relevant.
+Sometimes a message waiting in line is less useful than no message at all. Maybe it is a price update, a typing indicator, or a request that has already been replaced by newer information. Mark it as `LatestWins` and Rapidtransit will throw the old pending messages out the window.
 
 ```csharp
 await bus.Send(
     new OrderUpdate(orderId),
     partition: orderId,
-    giveupTime: TimeSpan.FromSeconds(30));
+    deliveryMode: DeliveryMode.LatestWins);
 ```
 
-`giveupTime` is optional and starts counting when `Send` puts the message in the queue. It includes time spent waiting for:
-
-- the channel;
-- `MaxParallelism`;
-- the message's partition gate.
-
-If the message has waited longer than its `giveupTime` when its turn arrives, Rapidtransit throws it out the window before middleware and before the handler. No exception, no retry, no paperwork. The worker simply processes the next message.
+`LatestWins` works per message type and partition key. When a newer message arrives for the same partition, any older message still waiting is discarded before middleware and before the handler. The worker then processes the newest message.
 
 ```csharp
 // The first message is being processed.
-await bus.Send(new OrderUpdate(orderId), partition: orderId);
+await bus.Send(new OrderUpdate(orderId, status: "processing"), partition: orderId);
 
-// If this waits longer than five seconds, it goes out the window.
+// Newer pending updates replace older pending updates.
 await bus.Send(
-    new OrderUpdate(orderId),
+    new OrderUpdate(orderId, status: "almost-done"),
     partition: orderId,
-    giveupTime: TimeSpan.FromSeconds(5));
+    deliveryMode: DeliveryMode.LatestWins);
+await bus.Send(
+    new OrderUpdate(orderId, status: "done"),
+    partition: orderId,
+    deliveryMode: DeliveryMode.LatestWins);
 ```
 
-This is especially useful with partitioned messages: strict ordering still applies, but stale messages do not get a VIP pass to the handler just because they arrived first.
+The first message is allowed to finish. Of the messages waiting behind it, only `done` gets its moment in the handler. `almost-done` is politely shown the window. No exception, no retry, no paperwork.
+
+`LatestWins` requires a partition key. Without a partition there is no queue of related messages to coalesce, and Rapidtransit uses `DeliveryMode.EveryoneGetsAChance`.
+
+### Busy (no queue, no patience)
+
+Sometimes the partition is busy and everything arriving behind it is just clutter. `Busy` does not wait politely. It tries the partition gate once; if another message is already being processed, it throws the newcomer out the window immediately.
+
+```csharp
+await bus.Send(
+    new DeviceUpdate(deviceId, state: "working"),
+    partition: deviceId,
+    deliveryMode: DeliveryMode.Busy);
+
+// Discarded if the first update is still running.
+await bus.Send(
+    new DeviceUpdate(deviceId, state: "working-again"),
+    partition: deviceId,
+    deliveryMode: DeliveryMode.Busy);
+```
+
+Once the current message finishes, the partition is available again. `Busy` requires a partition key and only discards messages that find that partition busy; it does not cancel the message already running.
 
 ## Architecture
 
 You asked for a diagram. Fine. Here is your useless diagram.
 
 ```
-bus.Send(message, partition?, giveupTime?)
+bus.Send(message, partition?, deliveryMode?)
     └─► Channel<Envelope>.Writer.WriteAsync()
 
 DispatchWorker (BackgroundService)

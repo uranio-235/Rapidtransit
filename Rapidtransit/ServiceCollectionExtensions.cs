@@ -30,6 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(opts);
         services.AddSingleton(channel);
         services.AddSingleton(registry);
+        services.AddSingleton<LatestWinsRegistry>();
         services.AddSingleton<IBus, RapidBus>();
         services.AddHostedService<DispatchWorker>();
 

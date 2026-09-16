@@ -1,3 +1,3 @@
 namespace Rapidtransit;
 
-internal sealed record Envelope(object Message, string? Partition, TimeSpan? GiveupTime, long EnqueuedTimestamp);
+internal sealed record Envelope(object Message, string? Partition, DeliveryMode DeliveryMode, long Sequence);
