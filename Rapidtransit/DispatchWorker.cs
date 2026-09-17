@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -43,7 +42,13 @@ internal sealed class DispatchWorker(
                         if (envelope.DeliveryMode == DeliveryMode.Busy)
                         {
                             if (!partitionGate.Wait(0))
+                            {
+                                logger.LogInformation(
+                                    "Discarding {MessageType} from partition {Partition} because it is busy mode.",
+                                    envelope.Message.GetType().Name,
+                                    envelope.Partition);
                                 return;
+                            }
                         }
                         else
                         {
@@ -55,6 +60,10 @@ internal sealed class DispatchWorker(
                         if (envelope.DeliveryMode == DeliveryMode.LatestWins &&
                             !latestWinsRegistry.IsLatest(key, envelope))
                         {
+                            logger.LogInformation(
+                                "Discarding {MessageType} from partition {Partition} because a newer message won mode",
+                                envelope.Message.GetType().Name,
+                                envelope.Partition);
                             return;
                         }
                     }
